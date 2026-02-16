@@ -85,79 +85,51 @@ def process_excel_data(df: pd.DataFrame) -> List[dict]:
     
     chunks = []
     
-    # Ensure date is datetime
+    # Group by month for monthly summaries
     df['date'] = pd.to_datetime(df['date'])
     df['month'] = df['date'].dt.to_period('M')
     
-    # 1. OVERALL SUMMARY (Most important for "total" queries)
-    total_expenses = df['price'].sum()
-    total_transactions = len(df)
-    avg_transaction = df['price'].mean()
-    date_range = f"{df['date'].min().strftime('%Y-%m-%d')} to {df['date'].max().strftime('%Y-%m-%d')}"
-    
-    overall_summary = f"""OVERALL EXPENSE SUMMARY
-Total spending across all categories: ${total_expenses:.2f}
-Total number of transactions: {total_transactions}
-Average transaction amount: ${avg_transaction:.2f}
-Date range: {date_range}
-All expenses total sum amount: ${total_expenses:.2f}"""
-    
-    chunks.append({
-        "text": overall_summary,
-        "metadata": {"type": "overall_summary", "priority": "high"}
-    })
-    
-    # 2. CATEGORY SUMMARIES (with totals emphasized)
-    for category, group in df.groupby('category'):
-        total = group['price'].sum()
-        count = len(group)
-        avg = group['price'].mean()
-        
-        chunk_text = f"""CATEGORY SUMMARY: {category}
-Category: {category}
-Total spent in {category}: ${total:.2f}
-Total amount for {category} category: ${total:.2f}
-Number of {category} transactions: {count}
-Average {category} transaction: ${avg:.2f}"""
-        
-        chunks.append({
-            "text": chunk_text,
-            "metadata": {
-                "type": "category_summary", 
-                "category": str(category),
-                "priority": "high"
-            }
-        })
-    
-    # 3. MONTHLY SUMMARIES
+    # Monthly summary chunks
     for month_period, month_df in df.groupby('month'):
         month = str(month_period)
         total = month_df['price'].sum()
         count = len(month_df)
-        categories = month_df.groupby('category')['price'].sum().to_dict()
+        categories = month_df['category'].value_counts().to_dict()
         
-        categories_text = "\n".join([f"  - {cat}: ${amt:.2f}" for cat, amt in categories.items()])
-        
-        chunk_text = f"""MONTHLY SUMMARY: {month}
-Month: {month}
-Total monthly expenses: ${total:.2f}
-Total spending in {month}: ${total:.2f}
+        chunk_text = f"""Month: {month}
+Total expenses: ${total:.2f}
 Number of transactions: {count}
-Breakdown by category:
-{categories_text}"""
+Categories: {json.dumps(categories, indent=2)}"""
         
         chunks.append({
             "text": chunk_text,
-            "metadata": {"type": "monthly_summary", "month": month, "priority": "medium"}
+            "metadata": {"type": "monthly_summary", "month": month}
         })
     
-    # 4. INDIVIDUAL TRANSACTIONS (lower priority for retrieval)
-    # Only include recent transactions or limit the number
-    recent_df = df.nlargest(20, 'date')  # Only most recent 20
+    # Category summary chunks
+    category_summary = df.groupby('category').agg({
+        'price': ['sum', 'mean', 'count']
+    }).reset_index()
     
-    for _, row in recent_df.iterrows():
-        chunk_text = f"""Transaction Details
-Date: {row['date'].strftime('%Y-%m-%d')}
+    for _, row in category_summary.iterrows():
+        category = row['category']
+        total = float(row['price']['sum'])
+        avg = float(row['price']['mean'])
+        count = int(row['price']['count'])
+        
+        chunk_text = f"""Category: {category}
+Total spent: ${total:.2f}
+Average transaction: ${avg:.2f}
+Number of transactions: {count}"""
+        
+        chunks.append({
+            "text": chunk_text,
+            "metadata": {"type": "category_summary", "category": str(category)}
+        })
+    
+    # Individual transaction chunks (for recent/specific queries)
+    for _, row in df.iterrows():
+        chunk_text = f"""Transaction on {row['date'].strftime('%Y-%m-%d')}
 Name: {row['name']}
 Category: {row['category']}
 Amount: ${row['price']:.2f}"""
@@ -168,12 +140,12 @@ Amount: ${row['price']:.2f}"""
                 "type": "transaction",
                 "date": row['date'].strftime('%Y-%m-%d'),
                 "category": str(row['category']),
-                "amount": float(row['price']),
-                "priority": "low"
+                "amount": float(row['price'])
             }
         })
     
     return chunks
+    
 
 
 @app.post("/upload_expenses")
@@ -202,16 +174,11 @@ async def upload_expenses(file: UploadFile = File(...), user_id: str = "default"
         # Create collection name for user
         collection_name = f"expenses_{user_id.replace('-', '_')}"
         
-        # Delete existing collection if it exists (FIXED)
+        # Delete existing collection if it exists
         try:
-            existing_collection = chroma_client.get_collection(collection_name)
             chroma_client.delete_collection(collection_name)
-            print(f"Deleted existing collection: {collection_name}")
-        except ValueError:
-            # Collection doesn't exist, which is fine
-            print(f"No existing collection to delete: {collection_name}")
-        except Exception as e:
-            print(f"Error checking/deleting collection: {e}")
+        except:
+            pass
         
         # Create new collection
         collection = chroma_client.create_collection(
@@ -237,35 +204,11 @@ async def upload_expenses(file: UploadFile = File(...), user_id: str = "default"
         return {
             "status": "success",
             "message": f"Uploaded {len(df)} transactions, created {len(chunks)} chunks",
-            "user_id": user_id,
-            "collection_name": collection_name
+            "user_id": user_id
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-
-@app.get("/debug/collection/{user_id}")
-async def debug_collection(user_id: str):
-    """Debug endpoint to see what's in the collection"""
-    
-    collection_name = f"expenses_{user_id.replace('-', '_')}"
-    
-    try:
-        collection = chroma_client.get_collection(collection_name)
-        all_data = collection.get()
-        
-        return {
-            "collection_name": collection_name,
-            "total_documents": collection.count(),
-            "sample_documents": all_data["documents"][:3],
-            "sample_metadata": all_data["metadatas"][:3],
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -284,54 +227,19 @@ async def chat(request: ChatRequest):
                 detail="No expense data found. Please upload an Excel file first."
             )
         
-        # Detect query type and adjust retrieval
-        question_lower = request.question.lower()
+        # Query vector store
+        query_embedding = embeddings.embed_query(request.question)
         
-        # For total/summary queries, get more results and filter
-        if any(word in question_lower for word in ['total', 'all', 'overall', 'how much', 'sum']):
-            n_results = 15
-            # Try to get overall summary first
-            results = collection.query(
-                query_embeddings=[embeddings.embed_query(request.question)],
-                n_results=n_results,
-                where={"priority": {"$in": ["high", "medium"]}}  # Filter for summaries
-            )
-            
-            # If no high priority results, search without filter
-            if not results["documents"][0]:
-                results = collection.query(
-                    query_embeddings=[embeddings.embed_query(request.question)],
-                    n_results=n_results
-                )
-        else:
-            # For specific queries
-            results = collection.query(
-                query_embeddings=[embeddings.embed_query(request.question)],
-                n_results=10
-            )
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=5
+        )
         
-        # Build context - prioritize summary documents
-        docs_with_meta = list(zip(results["documents"][0], results["metadatas"][0]))
+        # Build context from retrieved documents
+        context = "\n\n".join(results["documents"][0])
+        sources = [f"{meta.get('type', 'unknown')}" for meta in results["metadatas"][0]]
         
-        # Sort by priority
-        priority_order = {"high": 0, "medium": 1, "low": 2}
-        docs_with_meta.sort(key=lambda x: priority_order.get(x[1].get("priority", "low"), 3))
-        
-        # Build context
-        context_parts = []
-        for i, (doc, meta) in enumerate(docs_with_meta[:10], 1):  # Take top 10
-            context_parts.append(f"--- Data {i} ({meta.get('type', 'unknown')}) ---\n{doc}")
-        
-        context = "\n\n".join(context_parts)
-        
-        # Debug output
-        print(f"\n=== QUESTION: {request.question} ===")
-        print(f"\n=== RETRIEVED TYPES: {[m.get('type') for _, m in docs_with_meta[:10]]} ===")
-        print(f"\n=== CONTEXT (first 500 chars) ===\n{context[:500]}...\n")
-        
-        sources = [meta.get('type', 'unknown') for _, meta in docs_with_meta[:10]]
-        
-        # Generate answer
+        # Generate answer using LM Studio
         answer = call_lm_studio(request.question, context)
         
         return ChatResponse(
