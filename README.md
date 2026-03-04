@@ -1,33 +1,33 @@
 # TestRAGExpense
 
-An Expense Tracker AI Assistant API built with FastAPI + RAG.
-
-This project lets you:
-- Upload an Excel file of expenses.
-- Convert the data into semantic chunks (overall, monthly, category, and recent transactions).
-- Store embeddings in ChromaDB.
-- Ask natural-language questions about spending through a chat endpoint.
-
-The app is designed to work with an LM Studio-compatible chat completion endpoint.
+An intelligent **Expense Tracker AI Assistant** API built with FastAPI, ChromaDB, and Groq's LLM. Query your expenses using natural language with a Retrieval-Augmented Generation (RAG) pipeline.
 
 ## Features
 
-- FastAPI backend with REST endpoints.
-- Excel ingestion (`.xlsx` / `.xls`) with required schema validation.
-- RAG pipeline using:
-	- `sentence-transformers/all-MiniLM-L6-v2` embeddings
-	- ChromaDB persistent collections
-- Smart retrieval behavior for summary/total-style questions.
-- Health endpoint to check LM Studio connectivity.
+✨ **Core Capabilities**
+- Upload Excel files containing expense data
+- Automatic semantic chunking (overall summaries, monthly breakdowns, categories, recent transactions)
+- Vector embeddings stored in persistent ChromaDB
+- Natural language Q&A about spending patterns
+- Multi-turn conversation support
+- Powered by Groq's fast LLM inference
+
+🛠️ **Technical Features**
+- FastAPI REST API with auto-generated docs
+- Excel validation with required schema enforcement
+- HuggingFace embeddings for semantic search
+- ChromaDB for persistent vector storage
+- CORS middleware for cross-origin requests
+- Health check endpoint
 
 ## Tech Stack
 
-- Python 3.10+
-- FastAPI + Uvicorn
-- Pandas + OpenPyXL
-- ChromaDB
-- LangChain Community Embeddings
-- HTTPX
+- **Backend**: Python 3.10+, FastAPI, Uvicorn
+- **Data Processing**: Pandas, OpenPyXL
+- **Vector DB**: ChromaDB
+- **Embeddings**: sentence-transformers/all-MiniLM-L6-v2
+- **LLM**: Groq API (llama-3.3-70b-versatile)
+- **HTTP**: HTTPX
 
 ## Project Structure
 
@@ -41,39 +41,52 @@ chroma_db/                      # Persistent ChromaDB data
 
 ## Installation
 
-### 1) Clone and enter the project
+### 1. Clone and enter the project
 
 ```bash
 git clone <your-repo-url>
 cd TestRAGExpense
 ```
 
-### 2) Create and activate a virtual environment
+### 2. Create and activate a virtual environment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3) Install dependencies
+### 3. Install dependencies
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### Run the server
+
+```bash
+uvicorn main:app --reload --port 8001
+```
+
+### 4. Set up environment variables
+
+Create a `.env` file in the project root:
+
+```bash
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+Get your Groq API key from [https://console.groq.com](https://console.groq.com)
+
 ## Configuration
 
-In `main.py`, these constants are used:
+Key settings in `main.py`:
 
-- `LM_STUDIO_URL`: URL for chat completions endpoint.
-- `CHROMA_PERSIST_DIR`: directory where Chroma stores vectors (`./chroma_db`).
-
-If your LM Studio server is local, you may want to change it to something like:
-
-```python
-LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
-```
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `GROQ_API_KEY` | Environment variable | Groq API authentication |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | LLM model for response generation |
+| `CHROMA_PERSIST_DIR` | `./chroma_db` | Vector database storage location |
 
 ## Run the API
 
@@ -81,30 +94,33 @@ LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
 python main.py
 ```
 
-Server starts at:
+Server starts at **`http://0.0.0.0:8001`**
 
-- `http://0.0.0.0:8001`
-
-Interactive docs:
-
-- `http://localhost:8001/docs`
+**Interactive API docs**: `http://localhost:8001/docs`
 
 ## Expected Excel Format
 
-Your uploaded Excel file must include these columns:
+Your uploaded Excel file must include these required columns:
 
-- `name`
-- `price`
-- `category`
-- `date`
+| Column | Type | Example |
+|--------|------|---------|
+| `name` | string | "Coffee", "Laptop" |
+| `price` | float | 4.50, 1299.99 |
+| `category` | string | "Food", "Electronics" |
+| `date` | date | 2026-01-03 |
 
-Example rows:
+### Example Data
 
-| name      | price | category  | date       |
-|-----------|-------|-----------|------------|
-| Coffee    | 4.50  | Food      | 2026-01-03 |
-| Taxi      | 12.00 | Transport | 2026-01-03 |
-| Groceries | 48.90 | Food      | 2026-01-04 |
+```
+name         | price  | category    | date
+-------------|--------|-------------|----------
+Coffee       | 4.50   | Food        | 2026-01-03
+Taxi         | 12.00  | Transport   | 2026-01-03
+Groceries    | 48.90  | Food        | 2026-01-04
+Laptop       | 1299.99| Electronics | 2026-01-05
+```
+
+**Supported formats**: `.xlsx`, `.xls`
 
 ## API Endpoints
 
